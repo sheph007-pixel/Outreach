@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "lib": ["ES2022"],
+    "outDir": "./dist",
+    "rootDir": "..",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "paths": {
+      "@/*": ["../src/*"]
+    },
+    "baseUrl": ".."
+  },
+  "include": [
+    "./**/*.ts",
+    "../src/lib/db.ts",
+    "../src/lib/constants.ts",
+    "../src/lib/utils.ts",
+    "../src/lib/graph.ts",
+    "../src/lib/openai.ts",
+    "../src/lib/errors.ts",
+    "../src/services/**/*.ts",
+    "../src/types/**/*.ts"
+  ],
+  "exclude": ["dist", "node_modules"]
+}
