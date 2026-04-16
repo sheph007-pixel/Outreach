@@ -1,0 +1,20 @@
+allowBuilds:
+  /: true
+  '@': true
+  '@prisma/client': false
+  '@prisma/engines': false
+  a: true
+  c: true
+  e: true
+  esbuild: false
+  i: true
+  l: true
+  m: true
+  n: true
+  p: true
+  prisma: false
+  r: true
+  s: true
+  t: true
+  unrs-resolver: false
+packageManagerStrict: false

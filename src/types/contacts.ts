@@ -1,9 +1,13 @@
 import { z } from 'zod'
-import type { Contact, ContactStatus, ReplyType, ContactStatusHistory, OutreachThread } from '@prisma/client'
+import type { Contact, ContactStatus, ReplyType, ContactStatusHistory, OutreachThread, OutboundMessage } from '@prisma/client'
+
+export type ThreadWithMessages = OutreachThread & {
+  messages: OutboundMessage[]
+}
 
 export type ContactWithRelations = Contact & {
   statusHistory: ContactStatusHistory[]
-  threads: OutreachThread[]
+  threads: ThreadWithMessages[]
 }
 
 export type ContactListItem = Pick<
