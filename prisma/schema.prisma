@@ -1,0 +1,383 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// NextAuth.js Required Tables
+// ============================================================
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts      Account[]
+  sessions      Session[]
+  oauthAccounts OAuthAccount[]
+  agentMemories AgentMemory[]
+  auditLogs     AuditLog[]
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ============================================================
+// Microsoft Graph API Tokens (separate from NextAuth accounts)
+// ============================================================
+
+model OAuthAccount {
+  id           String    @id @default(cuid())
+  userId       String
+  provider     String    // "microsoft"
+  accessToken  String    @db.Text
+  refreshToken String?   @db.Text
+  expiresAt    DateTime?
+  scope        String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@map("oauth_accounts")
+}
+
+// ============================================================
+// Core Business Tables
+// ============================================================
+
+enum ContactStatus {
+  active
+  paused
+  blocked
+  replied
+  finished
+}
+
+enum ReplyType {
+  yes
+  no
+  later
+  next_year
+  interested
+  unsubscribe
+  none
+}
+
+model Contact {
+  id           String        @id @default(cuid())
+  email        String        @unique
+  firstName    String?
+  lastName     String?
+  company      String?
+  title        String?
+  phone        String?
+  city         String?
+  state        String?
+  groupSize    Int?
+  renewalMonth Int?          // 1-12
+  source       String?       // "csv_import", "manual", "referral"
+  notes        String?       @db.Text
+
+  status       ContactStatus @default(active)
+  replyType    ReplyType     @default(none)
+
+  priorityScore   Float      @default(0)
+  engagementScore Float      @default(0)
+  responseScore   Float      @default(0)
+
+  nextContactAt   DateTime?
+  lastContactedAt DateTime?
+  lastRepliedAt   DateTime?
+  lastOutcome     String?
+  blockedReason   String?
+  totalOutreach   Int        @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  statusHistory        ContactStatusHistory[]
+  threads              OutreachThread[]
+  followUpTasks        FollowUpTask[]
+  signals              ContactSignal[]
+  decisionLogs         DecisionLog[]
+  deliverabilityEvents DeliverabilityEvent[]
+
+  @@index([status])
+  @@index([nextContactAt])
+  @@index([priorityScore])
+  @@index([renewalMonth])
+  @@map("contacts")
+}
+
+model ContactStatusHistory {
+  id         String         @id @default(cuid())
+  contactId  String
+  fromStatus ContactStatus?
+  toStatus   ContactStatus
+  reason     String?
+  changedBy  String?        // "system", "user", or userId
+  createdAt  DateTime       @default(now())
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([contactId])
+  @@map("contact_status_history")
+}
+
+// ============================================================
+// Outreach / Messaging
+// ============================================================
+
+model OutreachThread {
+  id             String   @id @default(cuid())
+  contactId      String
+  graphThreadId  String?  @unique // Microsoft Graph conversationId
+  graphMessageId String?  // ID of the first message
+  subject        String
+  status         String   @default("open") // "open", "replied", "closed"
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  contact  Contact          @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  messages OutboundMessage[]
+
+  @@index([contactId])
+  @@index([status])
+  @@map("outreach_threads")
+}
+
+model OutboundMessage {
+  id              String   @id @default(cuid())
+  threadId        String
+  graphMessageId  String?  @unique // Microsoft Graph message ID
+  subject         String
+  bodyHtml        String   @db.Text
+  bodyText        String?  @db.Text
+  messageType     String   // "initial", "follow_up", "reply"
+  promptVersionId String?
+  sentAt          DateTime @default(now())
+
+  thread        OutreachThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  promptVersion PromptVersion? @relation(fields: [promptVersionId], references: [id])
+
+  @@index([threadId])
+  @@map("outbound_messages")
+}
+
+// ============================================================
+// Task / Job Queue
+// ============================================================
+
+enum TaskStatus {
+  pending
+  processing
+  completed
+  failed
+  cancelled
+}
+
+enum TaskType {
+  initial_outreach
+  follow_up
+  check_reply
+  re_engage
+  score_update
+}
+
+model FollowUpTask {
+  id          String     @id @default(cuid())
+  contactId   String
+  taskType    TaskType
+  status      TaskStatus @default(pending)
+  scheduledAt DateTime
+  startedAt   DateTime?
+  completedAt DateTime?
+  attempts    Int        @default(0)
+  maxAttempts Int        @default(3)
+  lastError   String?    @db.Text
+  metadata    Json?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([status, scheduledAt])
+  @@index([contactId])
+  @@map("follow_up_tasks")
+}
+
+// ============================================================
+// Agent / AI Tables
+// ============================================================
+
+model AgentSetting {
+  id       String   @id @default(cuid())
+  key      String   @unique
+  value    Json
+  label    String?
+  category String?  // "sending", "ai", "rules", "tone"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("agent_settings")
+}
+
+model AgentMemory {
+  id       String  @id @default(cuid())
+  userId   String
+  content  String  @db.Text
+  category String? // "preference", "instruction", "context"
+  active   Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("agent_memories")
+}
+
+model AiAction {
+  id          String   @id @default(cuid())
+  actionType  String   // "send_email", "update_status", "schedule_followup", "update_score"
+  contactId   String?
+  payload     Json
+  status      String   @default("pending") // "pending", "approved", "executed", "rejected"
+  result      Json?
+  requestedAt DateTime @default(now())
+  executedAt  DateTime?
+
+  @@index([status])
+  @@index([contactId])
+  @@map("ai_actions")
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  action     String   // "contact.created", "email.sent", "status.changed", etc.
+  entityType String?  // "contact", "thread", "setting"
+  entityId   String?
+  details    Json?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([action])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model ContactSignal {
+  id        String   @id @default(cuid())
+  contactId String
+  type      String   // "email_opened", "link_clicked", "bounce", "manual_note"
+  source    String?  // "graph_webhook", "manual", "worker"
+  data      Json?
+  createdAt DateTime @default(now())
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([contactId])
+  @@index([type])
+  @@map("contact_signals")
+}
+
+model DecisionLog {
+  id           String   @id @default(cuid())
+  contactId    String?
+  taskId       String?
+  decision     String   // "send_initial", "send_followup", "skip_blocked", "wait"
+  reasoning    String   @db.Text
+  modelUsed    String?
+  inputTokens  Int?
+  outputTokens Int?
+  latencyMs    Int?
+  createdAt    DateTime @default(now())
+
+  contact Contact? @relation(fields: [contactId], references: [id])
+
+  @@index([contactId])
+  @@index([createdAt])
+  @@map("decision_logs")
+}
+
+model DeliverabilityEvent {
+  id        String   @id @default(cuid())
+  contactId String
+  messageId String?
+  eventType String   // "bounce_hard", "bounce_soft", "failed", "blocked"
+  details   Json?
+  createdAt DateTime @default(now())
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([contactId])
+  @@index([eventType])
+  @@map("deliverability_events")
+}
+
+model PromptVersion {
+  id       String  @id @default(cuid())
+  name     String  // "initial_outreach_v1", "follow_up_v2"
+  category String  // "outreach", "follow_up", "classification", "reasoning"
+  content  String  @db.Text
+  version  Int
+  active   Boolean @default(true)
+  createdAt DateTime @default(now())
+
+  messages OutboundMessage[]
+
+  @@unique([name, version])
+  @@map("prompt_versions")
+}
