@@ -1,14 +1,18 @@
-import { Card, CardContent } from '@/components/ui/card'
+import { AgentChat } from '@/components/agent/agent-chat'
+import { MemoryPanel } from '@/components/agent/memory-panel'
 
 export default function AgentPage() {
   return (
     <div>
       <h1 className="mb-6 text-2xl font-bold text-gray-900">Agent Chat</h1>
-      <Card>
-        <CardContent className="py-12 text-center">
-          <p className="text-gray-500">AI agent chat coming in Phase 4.</p>
-        </CardContent>
-      </Card>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <div className="lg:col-span-2">
+          <AgentChat />
+        </div>
+        <div>
+          <MemoryPanel />
+        </div>
+      </div>
     </div>
   )
 }
